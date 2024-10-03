@@ -1,5 +1,5 @@
 import boto3
-from utils import *
+from handlers import *
 import datetime
 import os
 from mangum import Mangum
@@ -118,7 +118,6 @@ async def submit_form(
             "version": version,
             "comment": comment,
         }
-        
         return f""" 
         <html>
             <head>
@@ -138,31 +137,7 @@ async def submit_form(
     except Exception as e:
         return return_json_message({'Erro': type(e), "Mensagem de Erro": {e}}, email)
 
-def return_log_message(action, email, source, target = None, result = None, analysis_id = None, comment = None) -> dict:
-    with open("logs.log", "r") as log: log = log.read().splitlines()
-    with open("logs.log", "w"): pass # Limpando o arquivo de log
-
-    return {
-        "date":datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
-        "action":action,
-        "user":email,
-        "source_region":source,
-        "target_region":target,
-        "status":'SUCCESS' if result == 1 else 'FAIL',
-        "analysis_id":analysis_id,
-        "comment":comment if comment else "Nenhuma Observação",
-        "logs": log
-    }
-
-def return_json_message(body:str, email:str) -> dict:
-    return {
-        "date":datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
-        "statusCode": "FAIL",
-        "body": body,
-        "user": email
-    }
-
-def lambda_handler(event, context):
+def lambda_handler(event: dict[str,str], context):
     """Function that handles all the lambda api
 
     Args:
@@ -177,7 +152,7 @@ def lambda_handler(event, context):
         for param in required_params:
             if not event.get(param):
                 logger.critical(f"Missing required event parameter: {param}.")
-                return return_json_message(f"Missing required event parameters: {', '.join(required_params)}", event.get('email'))
+                return return_json_message(f"Missing required event parameters: {', '.join(required_params)}", event.get('email',""))
 
         action = event['action'].upper()
         source = event['source_region']

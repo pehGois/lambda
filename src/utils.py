@@ -1,250 +1,10 @@
-import logging
-import json
-import requests
 import re
-import datetime
-
+import logging
+import requests
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='logs.log')
 logger = logging.getLogger(__name__)
-
-# Handlers
-def s3_save_json(data:dict):
-    """This function constructs a dict to send to the S3 Bucket and saves it in a temp JSON file"""
-    try:
-        file_path = 's3_response.json'
-        with open(file_path, 'w', encoding='UTF-8') as file:
-            json.dump(data, file, indent=4, default=str, ensure_ascii=False)
-        return file_path
-    except Exception as e:
-        logger.error(f'\nAn error ocurred in s3_save_json function\n   Error: {e}')
-
-def s3_upload_file(s3_client, data:dict[str,str,str], file_path:str, bucket_name:str, stakeholder:str):
-    """Function that upload the data to a S3 bucket in AWS
-
-    Args:
-        s3_client : client s3
-        data (dict): dict with the analysis/template info
-        file_path (str): path where the data is saved
-        bucket_name (str): the name of the bucket in AWS
-        stakeholder (str): the name of the stakeholder. This will act as a folder inside the Bucket
-    """
-    object_name = f'{data['name']}_{data['version'] if data['version'] != 0 else "migration"}_{data['date']}.{file_path.split(".")[1]}'
-    try:
-        path = f'quicksight_templates/{stakeholder.upper()}/{data['name'].replace('_template',"").lower()}/{object_name}'
-        s3_client.upload_file(file_path, bucket_name, path)
-        logger.debug(f'File {data} uploaded to {bucket_name} on the path:{path}')
-        logger.info(f"Data uploaded Sucessfully to {bucket_name} on the path: {path}")
-    except FileNotFoundError:
-        logger.error('The file was not found')
-    except Exception as e:
-        logger.error(f'An error ocorred in s3_upload_file function.\nError Message:{e}')
-
-def migrate_analysis_handler(acc_id:str, analysis_id:str, user_arn:str, source_client:dict, target_client:dict, s3_client, bucket_name, stakeholder) -> int:
-    """Handle the migration function and saves the .qs file into the s3
-
-    Args:
-        acc_id (str): quicksight account
-        analysis_id (str): Analysis Id
-        user_arn (str): User ARN. Can be obtained by Search User Function
-        source_client (dict): Client where the analysis already is
-        target_client (dict): Client that you want to transfer the analysis to
-        s3_client (class): S3 Client to save the analysis definition
-
-    Returns:
-        int: Returns 1 if 'SUCCESS' and 0 if 'FAIL'
-    """
-    try:
-        analysis_definition = describe_analysis_definition(source_client['client'], acc_id, analysis_id)
-        arn_list = analysis_definition['Definition']['DataSetIdentifierDeclarations']
-        
-        for index, dataset_identifier in enumerate(arn_list):
-            analysis_definition['Definition']['DataSetIdentifierDeclarations'][index]['DataSetArn'] = create_dataset_handler(acc_id, extract_id_from_arn(dataset_identifier['DataSetArn']), user_arn, source_client, target_client)
-
-        if analysis_definition['ThemeArn'] : analysis_definition['ThemeArn'] = source_client['theme']
-
-        create_analysis_by_definition(target_client['client'],acc_id,analysis_definition)
-        grant_auth(target_client['client'],acc_id,analysis_id,user_arn)
-        
-        info = {
-            'author': user_arn.split("/")[2],
-            'source_region': source_client['region'], 
-            'template_id': analysis_definition['Id'],
-            'name': analysis_definition['Name'],
-            'date': datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
-            'analysis_definition': analysis_definition,
-            'version': 0
-        }
-
-        file_path = s3_save_json(info)
-
-        s3_upload_file(s3_client, info, file_path, bucket_name, stakeholder)
-        
-        return 1
-    
-    except Exception as e:
-        logger.error(f'An error ocurred in migrate_analysis_handler function.\n Error: {e}')
-        return 0
-
-def update_analysis_handler(client, acc_id:str, analysis_id:str, version:str, user_arn:str):
-    """Handle the update of the analysis
-
-    Args:
-        client: quickstart client
-        acc_id (str): account Id
-        analysis_id (str): analysis id
-        version (str): version of the template that you want to update the analysis for
-        user_arn (str): user arn
-
-    Returns:
-        int: 0 for failure and 1 for success
-    """
-    try:
-        analysis_info = describe_analysis(client,acc_id,analysis_id)
-        template_info = describe_template(client, acc_id, analysis_id, version)
-        dataset_references = create_dataset_references(client, acc_id, analysis_info['DataSetArns'])
-        
-        if update_analysis(client, acc_id, analysis_info, template_info, dataset_references) == 2:
-            logger.info("Starting to Recreate the Analysis Based in the Template")
-            create_analysis(client, acc_id, analysis_info,template_info,dataset_references)
-            grant_auth(client, acc_id, analysis_info['Id'],user_arn)
-        return 1
-    except Exception as e:
-        logger.error(f'An error ocorred in update_analysis_handler function.\nError Message:{e}')
-        return 0
-
-
-def create_dataset_handler(acc_id:str, database_id:str, user_arn:str, source_client: dict, target_client: dict) -> int:
-    """Handle the dataset Creation
-
-    Args:
-        acc_id (str): quicksight account
-        database_id (str): Database Identifier
-        user_arn (str): User ARN. Get by search User Function
-        source_client (dict): Client where the dataset already is
-        target_client (dict): Client that you want to transfer the dataset to
-
-    Returns:
-        int: Returns 1 if 'SUCCESS' and 0 if 'FAIL'
-    """
-    def switch_arn(dataset_info:dict):
-        """Function that switches the datasource Arn of the source analysis to the target one to make possible the migration."""
-        #Processo de Substituição do ARN do banco para o ARN da região Target
-        if len(dataset_info['PhysicalTableMap']) > 0:
-            PhysicalTableMap_id = next(iter(dataset_info['PhysicalTableMap']))
-            dataset_info['PhysicalTableMap'][PhysicalTableMap_id]['CustomSql']['DataSourceArn'] = target_client['arn']
-        return dataset_info
-    try:
-        dataset_info = describe_dataset(client=source_client['client'], acc_id=acc_id, database_id=database_id)
-        
-        if len(dataset_info['LogicalTableMap']) > 0 and len(dataset_info['PhysicalTableMap']) == 0:
-            logical_table = dataset_info['LogicalTableMap']
-
-            for id, logical_table_info in logical_table.items():
-                if logical_table_info['Alias'] != 'Intermediate Table':
-                    join_dataset_info = describe_dataset(source_client['client'], acc_id, extract_id_from_arn(logical_table_info['Source']['DataSetArn']))
-                    join_dataset_info = switch_arn(join_dataset_info)
-
-                    create_dataset(client=target_client['client'], acc_id=acc_id, user_arn=user_arn, dataset_info=join_dataset_info)
-                    dataset_info['LogicalTableMap'][id]['Source']['DataSetArn'] = logical_table_info['Source']['DataSetArn'].replace(source_client['region'],target_client['region'])
-        
-        else: dataset_info = switch_arn(dataset_info)
-
-        response = create_dataset(client=target_client['client'], acc_id=acc_id, user_arn=user_arn, dataset_info=dataset_info)
-        
-        if response == 2:
-            return dataset_info['Arn'].replace(source_client['region'],target_client['region'])
-        return response['Arn']
-    except Exception as e:
-        logger.error(f'An error ocorred in create_dataset_handler function.\nError Message:{e}')
-        return 0
-
-def create_template_handler(client,acc_id:str,analysis_id:str, comment:str, email:str, s3_client, bucket_name:str, stakeholder:str) -> int:
-    """Handle the Template Creation
-
-    Args:
-        client (class): quicksight client
-        acc_id (str): quicksight account
-        analysis_id (str): Analysis Id
-        user_arn (str): User ARN. Can be obtained by Search User Function
-        s3_client (class): s3 client
-        bucket_name (str): Name of the S3 bucket where the teamplate file will be stored
-        stakeholder (str): Name of the Stakeholder of the Template
-        version (string, optional): Version of the Template. Defaults to None.
-
-    Returns:
-        int: Returns 1 if Success and 0 if Fail
-    """
-    try: 
-        analysis_info = describe_analysis(client,acc_id,analysis_id)
-        dataset_references = create_dataset_references(client, acc_id, analysis_info['DataSetArns'])
-        if not create_template(client, acc_id, analysis_info, comment, dataset_references):
-            return 2
-        template_info = describe_template(client,acc_id,analysis_id)
-        analysis_definition = describe_analysis_definition(client, acc_id, analysis_id)
-        
-        info = {
-            'author': email,
-            'source_region': template_info['Arn'].split(':')[3], 
-            'template_id': template_info['Id'],
-            'name': template_info['Name'],
-            'date': datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
-            'analysis_definition': analysis_definition,
-            'version' : template_info['Version'],
-            'comment' : template_info['Description']
-        }
-
-        file_path = s3_save_json(info)
-        s3_upload_file(s3_client,info,file_path,bucket_name,stakeholder)         
-        logger.info('Template Created Sucefully')
-        return 1
-
-    except Exception as e: 
-        logger.error(f'An error ocurred in create_analysis_template function. \n    Error: {e}')
-        return 0
-
-def update_template_handler(client,acc_id:str,analysis_id:str,comment:str, email:str, s3_client, bucket_name:str, stakeholder:str) -> int:
-    """Handle the Template Update
-
-    Args:
-        client (class): quicksight client
-        acc_id (str): quicksight account
-        analysis_id (str): Analysis Id
-        user_arn (str): User ARN. Can be obtained by Search User Function
-        s3_client (class): s3 client
-        bucket_name (str): Name of the S3 bucket where the template file will be stored
-        stakeholder (str): Name of the Stakeholder of the Template
-        version (string, optional): Version of the Template. Defaults to None.
-
-    Returns:
-        int: Returns 1 if Success and 0 if Fail
-    """
-    try:
-        analysis_info = describe_analysis(client,acc_id,analysis_id)
-        dataset_references = create_dataset_references(client, acc_id, analysis_info['DataSetArns'])
-
-        update_template(client, acc_id, analysis_info, comment, dataset_references)
-        template_info = describe_template(client, acc_id, analysis_id)
-        analysis_definition = describe_analysis_definition(client, acc_id, analysis_id)
-
-        info = {
-            'author': email,
-            'source_region': template_info['Arn'].split(':')[3], 
-            'template_id': template_info['Id'],
-            'name': template_info['Name'],
-            'date': datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
-            'analysis_definition': analysis_definition,
-            'version' : template_info['Version'],
-            'comment' : template_info['Description']
-        }
-
-        file_path = s3_save_json(info)
-        s3_upload_file(s3_client,info,file_path,bucket_name,stakeholder)   
-        return 1
-
-    except Exception as e:
-        logger.error(f'An error ocurred in update_analysis_template function. \n    Error: {e}')
-        return 0
-    
+import traceback
+import time
 # ANALYSIS
 
 def describe_analysis(client, acc_id:str, analysis_id: str) -> dict :
@@ -356,29 +116,30 @@ def create_analysis(client, acc_id:str, analysis_info:dict, template_info:dict, 
         logger.info('Analysis Created With Success')
         return 1
 
-def list_analysis(client, acc_id:str)-> list[dict[str]]:
-    """List all the analysis in a region and returns it's characteristics 
-
-    Args:
-        client (class): quicksight client
-        acc_id (str): account Id
-
-    Returns:
-        list[dict[str]]: Id, Name, Arn, Status 
-    """
+def list_analysis(client, acc_id: str, next_token=None, analyses=[]):
     try:
-        list_analyses = []
-        response = client.list_analyses(AwsAccountId=acc_id)['AnalysisSummaryList']
-        for analysis in response:
-            list_analyses.append({
-                'Id':analysis['AnalysisId'],
+        if next_token:
+            response = client.list_analyses(AwsAccountId=acc_id, NextToken=next_token)
+        else:
+            response = client.list_analyses(AwsAccountId=acc_id)
+
+        for analysis in response['AnalysisSummaryList']:
+            analyses.append({
+                'Id': analysis['AnalysisId'],
                 'Name': analysis['Name'],
                 'Arn': analysis['Arn'],
-                'Status': analysis['Status']
+                'Status': analysis['Status'],
+                'CreatedTime': analysis['CreatedTime']
             })
-        return list_analyses
+
+        next_token = response.get('NextToken')
+        if next_token:
+            return list_analysis(client, acc_id, next_token, analyses)
+
     except Exception as e:
-        logger.error(f"An error ocurred in list_analysis function.\n Error: {e}")
+        logger.error(f"An error occurred in the list_analysis function.\nError: {e}")
+        
+    return analyses
 
 def list_deleted_analysis(client, acc_id) -> list[dict[str]]:
     """Filter the Analysis whose status is equal to DELETED
@@ -477,41 +238,66 @@ def grant_auth(client, acc_id:str, analysis_id:str, user_arn:str):
     except Exception as e:
         logger.error(f'An error ocurred in grant_auth function.\n Error: {e}')
 
+def create_analysis_by_definition(client, acc_id:str, analysis_definition:dict) -> int:
+    """Create an Analysis in the given Region
+
+    Args:
+        client (class): quicksight client
+        acc_id (str): account ID
+        analysis_info (dict): analysis info dictionary, can be obtained by Describe Analysis Function
+        template_info (dict): Tempate Info dictionary, can be obtained by Desribe Template Function
+        dataset_references (dict): Dataset References, can be obtained by Create Data Reference Function
+
+    Returns:
+        int: 1 if Success, 2 If already Exists, 1 if Fail
+    """
+    try:
+        client.create_analysis(
+            AwsAccountId = acc_id,
+            AnalysisId = analysis_definition['Id'],
+            Name = analysis_definition['Name'],
+            Definition = analysis_definition['Definition']
+        )
+    except Exception as e:
+        if str(type(e)) == "<class 'botocore.errorfactory.ResourceExistsException'>":
+            logger.warning('Analysis Already Exists in this Region')
+            return 2
+        elif str(type(e)) == "<class 'botocorefactory.ResourceNotFoundException'>":
+            logger.error('Analysis is Not Found')
+            return 0
+        else:
+            logger.error(f'An error ocurred in create_analysis_by_definition function.\n Error: {e}')
+            return 0
+    else:
+        logger.info('Analysis Created With Success')
+        return 1
+
 # DATASETS
 
 def describe_dataset(client, acc_id:str, database_id:str) -> dict[str]:
     '''Função Responsável por descrever as características de um dataset.
     Retorna um dicionário com os campos
-    {\n
-        Name [str] ,
-        DatasetId [str] ,
-        PhysicalTableMap [dict] ,
-        LogicalTableMap [dict] ,
-        ImportMode [str] ,
-        DataSourceId [str]
-    }
     '''
     try:
         response = client.describe_data_set(
             AwsAccountId = acc_id, 
             DataSetId = database_id
-        )['DataSet']
-
+        ).get('DataSet')
         dataset_info = {
-            'Name': response['Name'],
-            'DataSetId': response['DataSetId'],
-            'PhysicalTableMap': response['PhysicalTableMap'],
-            'LogicalTableMap': response['LogicalTableMap'],
-            'ImportMode': response['ImportMode'],
-            'Arn': response['Arn']
-
+            'Name': response.get('Name'),
+            'DataSetId': response.get('DataSetId'),
+            'PhysicalTableMap': response.get('PhysicalTableMap'),
+            'LogicalTableMap': response.get('LogicalTableMap'),
+            'ImportMode': response.get('ImportMode'),
+            'Arn': response.get('Arn')
         }
 
         if len(dataset_info['PhysicalTableMap']):
             PhysicalTableMap_id = next(iter(dataset_info['PhysicalTableMap']))
             dataset_info['DataSourceId'] = extract_id_from_arn(dataset_info['PhysicalTableMap'][PhysicalTableMap_id]['CustomSql']['DataSourceArn'])
-            
+
         return dataset_info
+
     except Exception as e:
         logger.error(f'An error ocurred in describe_dataset function: {e}')
         return None
@@ -544,39 +330,29 @@ def create_dataset(client, acc_id:str, dataset_info:dict[str], user_arn:str) -> 
             logger.error(f'An error ocurred in create_dataset function.\n Error: {e}')
         return 0
 
-def create_analysis_by_definition(client, acc_id:str, analysis_definition:dict) -> int:
-    """Create an Analysis in the given Region
-
-    Args:
-        client (class): quicksight client
-        acc_id (str): account ID
-        analysis_info (dict): analysis info dictionary, can be obtained by Describe Analysis Function
-        template_info (dict): Tempate Info dictionary, can be obtained by Desribe Template Function
-        dataset_references (dict): Dataset References, can be obtained by Create Data Reference Function
-
-    Returns:
-        int: 1 if Success, 2 If already Exists, 1 if Fail
-    """
+def update_dataset(client, acc_id,dataset_info, user_arn):
     try:
-        client.create_analysis(
-            AwsAccountId = acc_id,
-            AnalysisId = analysis_definition['Id'],
-            Name = analysis_definition['Name'],
-            Definition = analysis_definition['Definition']
+        response = client.update_data_set(
+                AwsAccountId=acc_id,
+                DataSetId=dataset_info['DataSetId'],
+                Name=f'{dataset_info['Name']}_copy',
+                PhysicalTableMap = dataset_info['PhysicalTableMap'],
+                LogicalTableMap = dataset_info['LogicalTableMap'],
+                ImportMode=dataset_info['ImportMode'],
+                Permissions=[
+                    {
+                        'Principal': user_arn,
+                        'Actions': ['quicksight:DescribeDataSet','quicksight:DescribeDataSetPermissions','quicksight:PassDataSet','quicksight:DescribeIngestion','quicksight:ListIngestions','quicksight:UpdateDataSet','quicksight:DeleteDataSet','quicksight:CreateIngestion','quicksight:CancelIngestion','quicksight:UpdateDataSetPermissions']
+
+                    }
+                ]
         )
+        logger.info("Dataset Created Sucefully")
+        return response
     except Exception as e:
-        if str(type(e)) == "<class 'botocore.errorfactory.ResourceExistsException'>":
-            logger.warning('Analysis Already Exists in this Region')
-            return 2
-        elif str(type(e)) == "<class 'botocorefactory.ResourceNotFoundException'>":
-            logger.error('Analysis is Not Found')
-            return 0
-        else:
-            logger.error(f'An error ocurred in create_analysis_by_definition function.\n Error: {e}')
-            return 0
-    else:
-        print('Analysis Created With Success')
-        return 1
+        logger.error(f'An error ocurred in create_dataset function.\n Error: {e}')
+        return 0
+    
 
 # TEMPLATES
 
@@ -684,7 +460,6 @@ def search_user(client, acc_id:str, email:str) -> dict:
         raise ValueError ('Email does not exist in the database')
     except ValueError as e:
         logger.error(e)
-        exit()
     except Exception as e: 
         logger.error(f'An error ocurred in search_user function.\n Error: {e}')
 
@@ -737,173 +512,3 @@ def create_dataset_references(client, acc_id:str, analysis_datasets_arns: list) 
         return DataSetReferences
     except Exception as e:
         logger.error(f'An error ocurred in create_dataset_references function.\n Error: {e}')
-
-# ASSET_BUNDLE (Substituído por import via analysis describe definition)
-
-#def export_asset_bundle(client, acc_id:str, analysis_info:dict[str,list]) -> str:
-    ''' Função responsável por exportar uma ou um conjunto de análises em um arquivo .qs para posterior importação.\n Retorna ID do Export '''
-    """ try:
-        job_id = f'{analysis_info['Id']}_job_id'
-        
-        ResourceArns = []
-        ResourceArns.append(analysis_info['Arn'])
-        ResourceArns.append(analysis_info['ThemeArn'])
-
-        client.start_asset_bundle_export_job(
-        AwsAccountId=acc_id,
-        AssetBundleExportJobId=job_id,
-        ResourceArns=ResourceArns,
-        IncludeAllDependencies=False,
-        ExportFormat='QUICKSIGHT_JSON',
-
-        IncludePermissions=True,
-        IncludeTags=True,
-        ValidationStrategy={
-            'StrictModeForAllResources': True
-        }
-        )
-        return job_id
-    
-    except Exception as e:
-        logger.error(f'An error ocurred in export_asset_bundle function.\n Error: {e}')
-        return None """
-
-#def import_asset_bundle(client,acc_id:str,job_id:str, analysis_info:dict, user_arn:str) -> int:
-    ''' Função Responsável por Importar o arquivo .qs na região desejada e atualizar as suas permissões de visualização na nova região.'''
-    """ try:
-        client.start_asset_bundle_import_job(
-            AwsAccountId=acc_id,
-            AssetBundleImportJobId=job_id,
-            AssetBundleImportSource={
-                'Body': open_file(f"{job_id}.qs")
-            },
-            FailureAction='ROLLBACK',     
-            OverridePermissions={
-                'Analyses': [
-                    {
-                        'AnalysisIds': [
-                            analysis_info['Id'],
-                        ],
-                        'Permissions': {
-                            'Principals': [
-                                user_arn,
-                            ],
-                            'Actions': [
-                                'quicksight:UpdateAnalysis',
-                                'quicksight:RestoreAnalysis', 
-                                'quicksight:UpdateAnalysisPermissions', 
-                                'quicksight:DeleteAnalysis', 
-                                'quicksight:QueryAnalysis',
-                                'quicksight:DescribeAnalysisPermissions', 
-                                'quicksight:DescribeAnalysis'
-                            ]
-                        }
-                    },
-                ]
-            }
-        )
-        return 1
-    except Exception as e:
-        logger.error(f'An error ocurred in import_asset_bundle function when import an analysis with the following ID {analysis_info['Id']}.\n Error: {e}')
-        return 0 """
-    
-
-#def describe_asset_bundle_export(client, acc_id: str, job_id: str) -> str:
-    '''Monitor the export status of asset bundles and download the file upon completion.'''
-    """ try:
-        while True:
-            response = client.describe_asset_bundle_export_job(
-                AwsAccountId=acc_id,
-                AssetBundleExportJobId=job_id
-            )
-
-            job_status = response.get('JobStatus')
-            if job_status == 'IN_PROGRESS':
-
-                logger.info('Export in Progress ...')
-                time.sleep(5)
-            else:
-                break
-
-        if job_status not in ['SUCCESSFUL', 'QUEUED_FOR_IMMEDIATE_EXECUTION']:
-            errors = response.get('Errors')
-            raise Exception (f'\n{[f'>> {error['Message']}' for error in errors]}')
-        else:
-            time.sleep(10)
-            get_file(response['DownloadUrl'], job_id)
-            return f'Export Status: {job_status}'
-    
-    except Exception as e:
-        if str(type(e)) == "<class 'botocore.errorfactory.ResourceNotFoundException'>":
-            logger.error('Export Not Found')
-
-        else:
-            logger.error(f'An error ocurred in describe_asset_bundle_export function.\n Error: {e}') """
-
-#def describe_asset_bundle_import(client, acc_id:str, job_id:str) -> str:
-    ''' Função Responsável por monitorar o estado da importação do arquivo .qs '''
-    """ try:
-        while True:
-
-            response = client.describe_asset_bundle_import_job(
-                AwsAccountId= acc_id,
-                AssetBundleImportJobId= job_id
-            )
-
-            job_status = response.get('JobStatus')
-            if job_status == 'IN_PROGRESS':
-
-                logger.info('Import in Progress ...')
-                time.sleep(5)
-            else:
-                break
-        try:
-            return f'Import Status: {response['JobStatus']}\nError: {response['Errors'][0]['Message']}'
-        except Exception:
-            return f'Import Status: {response['JobStatus']}'
-   
-    except Exception as e:
-        if str(type(e)) == "<class 'botocore.errorfactory.ResourceNotFoundException'>":
-            logger.error('Import Not Found')
-        else:
-            logger.error(f'An error ocurred in describe_asset_bundle_import function.\n Error: {e}')
-            return None """
-
-#def migrate_asset_handler(acc_id:str, analysis_id:str, user_arn:str, source_client:dict, target_client:dict, s3_client, bucket_name:str, stakeholder:str) -> int:
-    """Handle the migration function and saves the .qs file into the s3
-
-    Args:
-        acc_id (str): quicksight account
-        analysis_id (str): Analysis Id
-        user_arn (str): User ARN. Can be obtained by Search User Function
-        source_client (dict): Client where the asset already is
-        target_client (dict): Client that you want to transfer the asset to
-        s3_client (class): s3 client
-        bucket_name (str): Name of the S3 bucket where the .qs file will be stored
-        stakeholder (str): Name of the Stakeholder of the Assets
-
-    Returns:
-        int: Returns 1 if 'SUCCESS' and 0 if 'FAIL'
-    """
-    """ try:
-        analysis_info = describe_analysis(source_client['client'],acc_id,analysis_id)
-
-        for dataset_arn in analysis_info['DataSetArns']:
-            create_dataset_handler(acc_id, extract_id_from_arn(dataset_arn), user_arn, source_client, target_client)
-        
-        job_id = export_asset_bundle(source_client['client'], acc_id, analysis_info)
-        time.sleep(5)
-        logger.info(describe_asset_bundle_export(source_client['client'],acc_id,job_id))
-
-        data = {"name":"asset_bundle", "version": 1, "date":datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}
-        file_path = f"{job_id}.qs"
-        s3_upload_file(s3_client,data,file_path,bucket_name,stakeholder)
-        if import_asset_bundle(target_client['client'], acc_id, job_id, analysis_info, user_arn):
-            time.sleep(5)
-            logger.info(describe_asset_bundle_import(target_client['client'],acc_id,job_id))
-            return 1
-        raise Exception 
-    
-    except Exception as e:
-        logger.error(f'An error ocurred in migrate_asset_handler function.\n Error: {e}')
-        return 0 """
