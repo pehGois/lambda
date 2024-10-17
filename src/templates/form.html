@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="{{ url_for('static', path='favicon.ico') }}" type="image/x-icon">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+    <title>Quicksight API</title>
+</head>
+<body>
+    <main class="form-container">
+        <form id="request_form" action="/submit" method="post">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+
+            <label for="analysis_id">Analysis ID: (Opcional)</label>
+            <input type="text" id="analysis_id" name="analysis_id">
+
+            <label for="stakeholder">Stakeholder: (Opcional)</label>
+            <input type="text" id="stakeholder" name="stakeholder">
+
+            <label for="action">Action:</label>
+            <select class='select' id="action" name="action" required>
+                {% for action_name, function in ACTIONS.items() %}
+                    <option class="select" value="{{ action_name }}">{{ action_name }}</option>
+                {% endfor %}
+            </select>
+
+            <label for="source_region">Source Region:</label>
+            <select id="source_region" name="source_region" required>
+                <option value="us-west-2">us-west-2</option>
+                <option value="us-east-1">us-east-1</option>
+            </select>
+
+            <label for="target_region">Target Region: (Opcional)</label>
+            <select id="target_region" name="target_region">
+                <option value="us-east-1">us-east-1</option>
+                <option value="us-west-2">us-west-2</option>
+            </select>
+
+            <label for="import_mode">Import Mode: (Opcional)</label>
+            <select id="import_mode" name="import_mode" required>
+                <option value="DIRECT_QUERY">DIRECT_QUERY</option>
+                <option value="SPICE">SPICE</option>
+            </select>
+
+            <label for="version">Version (Opcional):</label>
+            <input type="number" id="version" name="version">
+
+            <label for="comment">Comment (Opcional):</label>
+            <textarea id="comment" name="comment" rows="4" cols="50"></textarea>
+
+            <input type="submit" value="Enviar">
+        </form>        
+    </main>
+</body>
+</html>

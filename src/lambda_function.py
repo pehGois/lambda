@@ -1,36 +1,40 @@
-import boto3
-from handlers import *
-import datetime
 import os
+import boto3
 from mangum import Mangum
-from fastapi import FastAPI, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from typing import Optional
+from utils.handlers import *
+from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv("env/.env")
 
-PROD_ARN = os.environ.get('PROD_ARN')
-DEV_ARN = os.environ.get('DEV_ARN')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID')
+THEME_ARN_PROD = os.environ.get('THEME_ARN_PROD')
+THEME_ARN_DEV = os.environ.get('THEME_ARN_DEV')
 PROD_REGION = os.environ.get('PROD_REGION')
 DEV_REGION = os.environ.get('DEV_REGION')
+PROD_ARN = os.environ.get('PROD_ARN')
+DEV_ARN = os.environ.get('DEV_ARN')
 BUCKET = os.environ.get('BUCKET')
-THEME_ARN_DEV = os.environ.get('THEME_ARN_DEV')
-THEME_ARN_PROD = os.environ.get('THEME_ARN_PROD')
+
 ACTIONS = {
-            "TEMPLATE_CREATION": create_template_handler,
-            "TEMPLATE_UPDATE": update_template_handler,
-            "ANALYSIS_UPDATE": update_analysis_handler,
-            "RESTORE_ANALYSIS": restore_analysis,
-            "LIST_DELETED_ANALYSIS": list_deleted_analysis,
-            "MIGRATION": migrate_analysis_handler
-        }
-with open('style.css', "r") as style: style = style.read()
+    'TESTE': "Oi",
+    "LIST_DELETED_ANALYSIS": list_deleted_analysis,
+    "TEMPLATE_CREATION": create_template_handler,
+    "ANALYSIS_UPDATE": update_analysis_handler,
+    "TEMPLATE_UPDATE": update_template_handler,
+    "MIGRATION": migrate_analysis_handler,
+    "RESTORE_ANALYSIS": restore_analysis,
+}
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 handler = Mangum(app)
+templates = Jinja2Templates(directory="templates")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,71 +45,26 @@ app.add_middleware(
 )
 
 @app.get("/", response_class=HTMLResponse)
-async def get_form():
+async def show_form(request:Request):
     try:
-        return f"""
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quicksight API</title>
-    <style>{style}</style>
-</head>
-<body>
-    <main class="form-container">
-        <form id="request_form" action="/submit" method="post">
-            <label for="email">Email:</label>
-            <input type="email" id="email" name="email" required>
-
-            <label for="analysis_id">Analysis ID: (Opcional)</label>
-            <input type="text" id="analysis_id" name="analysis_id">
-
-            <label for="stakeholder">Stakeholder: (Opcional)</label>
-            <input type="text" id="stakeholder" name="stakeholder">
-
-            <label for="action">Action:</label>
-            <select id="action" name="action" required>
-                {[f'<option value={action_name}>{action_name}</option>' for action_name, function in ACTIONS.items()]}
-            </select>
-
-            <label for="source_region">Source Region:</label>
-            <select id="source_region" name="source_region" required>
-                <option value="us-west-2">us-west-2</option>
-                <option value="us-east-1">us-east-1</option>
-            </select>
-
-            <label for="target_region">Target Region: (Opcional)</label>
-            <select id="target_region" name="target_region">
-                <option value="us-east-1">us-east-1</option>
-                <option value="us-west-2">us-west-2</option>
-            </select>
-
-            <label for="version">Version (Opcional):</label>
-            <input type="number" id="version" name="version">
-
-            <label for="comment">Comment (Opcional):</label>
-            <textarea id="comment" name="comment" rows="4" cols="50"></textarea>
-
-            <input type="submit" value="Enviar">
-        </form>        
-    </main>
-</script>
-</body>
-</html>
-"""
+        return templates.TemplateResponse(
+            'form.html', 
+            {"request":request, "ACTIONS": ACTIONS}
+        )
     except Exception as e:
-        return {'Erro': type(e), "Mensagem de Erro": {e}}
+        return templates.TemplateResponse('error.html', {"request":request,"error":e,"error_type":type(e).__name__})
 
 @app.post("/submit", response_class=HTMLResponse)
 async def submit_form(
-    email: str = Form(...),
+    request: Request,
+    email: str = Form(...), 
     analysis_id: Optional[str] = Form(None),
     stakeholder: Optional[str] = Form(None),
-    action: str = Form(...),
+    action: str = Form(...), 
     source_region: str = Form(...),
     target_region: str = Form(...),
     version: Optional[str] = Form(None),
-    comment: Optional[str] = Form(None)
+    comment: Optional[str] = Form(None),
 ):
     try:
         event = {
@@ -118,24 +77,12 @@ async def submit_form(
             "version": version,
             "comment": comment,
         }
-        return f""" 
-        <html>
-            <head>
-                <title>Response</title>
-            </head>
-            <style>{style}</style>
-            <body>
-                <main>
-                    <h2>Requisição Realizada</h2>
-                    <p>Resposta da API Quicksight</p>
-                    <pre>{json.dumps(lambda_handler(event, None), indent=4, ensure_ascii=False)}</pre>
-                    <a href="/">Voltar ao Formulário</a>
-                </main>
-            </body>
-        </html> 
-        """
+        return templates.TemplateResponse(
+            'response.html', 
+            {"request": request, "response": json.dumps(lambda_handler(event, None), indent=4, ensure_ascii=False)}
+        )
     except Exception as e:
-        return return_json_message({'Erro': type(e), "Mensagem de Erro": {e}}, email)
+        return templates.TemplateResponse('error.html', {"request":request,"error":e,"error_type":type(e).__name__})
 
 def lambda_handler(event: dict[str,str], context):
     """Function that handles all the lambda api
@@ -176,7 +123,7 @@ def lambda_handler(event: dict[str,str], context):
         source_client = client_map[source]
         target_client = client_map[target]
         user_arn = search_user(prod_client, AWS_ACCOUNT_ID, email)
-
+        print(action)
         if action not in ACTIONS:
             logger.critical(f"Invalid action: {action}.")
             return return_json_message(f"Invalid action: {action}", email)
@@ -190,6 +137,8 @@ def lambda_handler(event: dict[str,str], context):
         elif action == "MIGRATION":
             result = ACTIONS[action](AWS_ACCOUNT_ID, analysis_id, user_arn, source_client, target_client, s3_client, bucket, stakeholder)
 
+        elif action == 'TESTE':
+            result = ACTIONS.get(action)
         else:
             result = ACTIONS[action](source_client['client'], AWS_ACCOUNT_ID, analysis_id, comment, email, s3_client, bucket, stakeholder) if "TEMPLATE" in action else ACTIONS[action](source_client['client'], AWS_ACCOUNT_ID, analysis_id, version, user_arn)
 

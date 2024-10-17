@@ -1,11 +1,11 @@
 import json
 import datetime
-from utils import *
+from utils.utils import *
 
 # Handlers
 def return_log_message(action, email, source, target = None, result = None, analysis_id = None, comment = None) -> dict:
-    with open("logs.log", "r") as log: log = log.read().splitlines()
-    with open("logs.log", "w"): pass # Limpando o arquivo de log
+    with open("logs/logs.log", "r") as log: log = log.read().splitlines()
+    with open("logs/logs.log", "w"): pass # Limpando o arquivo de log
 
     return {
         "date":datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
@@ -76,22 +76,26 @@ def handle_s3_upload(info: dict, s3_client, bucket_name: str, stakeholder: str):
 def migrate_analysis_handler(acc_id: str, analysis_id: str, user_arn: str, source_client: dict, target_client: dict, s3_client, bucket_name: str, stakeholder: str) -> int:
     """Handles the migration function and saves the .qs file into the S3."""
     try:
-        print("Iniciou a Migração")
         analysis_definition = describe_analysis_definition(source_client['client'], acc_id, analysis_id)
         arn_list_dict = analysis_definition['Definition']['DataSetIdentifierDeclarations']
 
         for index, dataset_identifier in enumerate(arn_list_dict):
             # Creating each dataset of the analysis in the new region
-            new_arn = create_dataset_handler(acc_id, extract_id_from_arn(dataset_identifier['DataSetArn']), user_arn, source_client, target_client)
-            analysis_definition['Definition']['DataSetIdentifierDeclarations'][index]['DataSetArn'] = new_arn
+            try:
+                new_arn = create_dataset_handler(acc_id, extract_id_from_arn(dataset_identifier['DataSetArn']), user_arn, source_client, target_client)
+            except Exception as e:
+                logger.error(f'An error occurred while creating {dataset_identifier['Identifier']} function.\nError: {e}\nType:{type(e)}')
+
+            finally:
+                analysis_definition['Definition']['DataSetIdentifierDeclarations'][index]['DataSetArn'] = new_arn
+            
+
+        #analysis_definition['Definition']['DataSetIdentifierDeclarations'] = list(filter(lambda d: d["DataSetArn"] != 0, analysis_definition['Definition']["DataSetIdentifierDeclarations"]))
 
         if analysis_definition.get('ThemeArn'):
             analysis_definition['ThemeArn'] = source_client['theme']
-        
-        print("Começou a Descrever o Dataset")
-        
+                
         datasets_definition = [describe_dataset(target_client['client'], acc_id, extract_id_from_arn(arn['DataSetArn'])) for arn in arn_list_dict]
-        print(datasets_definition)
 
         create_analysis_by_definition(target_client['client'], acc_id, analysis_definition)
         grant_auth(target_client['client'], acc_id, analysis_id, user_arn)
@@ -143,7 +147,7 @@ def update_template_handler(client, acc_id: str, analysis_id: str, comment: str,
 def create_dataset_handler(acc_id: str, database_id: str, user_arn: str, source_client: dict, target_client: dict) -> int:
     """Handles the dataset creation."""
 
-    def switch_arn(dataset_info: dict) -> dict:
+    def switch_datasource_arn(dataset_info: dict) -> dict:
         """Switches the datasource Arn of the source analysis to the target one to enable migration."""
 
         if dataset_info['PhysicalTableMap']:
@@ -169,7 +173,7 @@ def create_dataset_handler(acc_id: str, database_id: str, user_arn: str, source_
                     dataset_info['LogicalTableMap'][id]['Source']['DataSetArn'] = logical_table_info['Source']['DataSetArn'].replace(source_client['region'], target_client['region'])
         
         else:
-            dataset_info = switch_arn(dataset_info)
+            dataset_info = switch_datasource_arn(dataset_info)
 
         response = create_dataset(client=target_client['client'], acc_id=acc_id, user_arn=user_arn, dataset_info=dataset_info)
         
@@ -226,3 +230,8 @@ def update_analysis_handler(client, acc_id: str, analysis_id: str, version: str,
     except Exception as e:
         logger.error(f'An error occurred in update_analysis_handler function.\nError Message: {e}')
         return 0
+    
+    client.get_object(
+        Bucket='caminho'
+        
+    )

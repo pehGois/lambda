@@ -1,10 +1,8 @@
 import re
 import logging
 import requests
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='logs.log')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='logs/logs.log')
 logger = logging.getLogger(__name__)
-import traceback
-import time
 # ANALYSIS
 
 def describe_analysis(client, acc_id:str, analysis_id: str) -> dict :
@@ -201,13 +199,10 @@ def describe_analysis_definition(client, acc_id:str, analysis_id:str) -> dict:
         data ={
             'Definition': response['Definition'],
             'Name': response['Name'],
-            'Id': response['AnalysisId']
+            'Id': response['AnalysisId'],
+            'ThemeArn': response.get('ThemeArn'),
         }
 
-        if 'ThemeArn' in data:
-            data['ThemeArn'] = response['ThemeArn']
-        else: 
-            data['ThemeArn'] = None
         return data
     except Exception as e:
         logger.error(f"An error ocurred in describe_analysis_definition function.\nError: {e}")
@@ -288,7 +283,7 @@ def describe_dataset(client, acc_id:str, database_id:str) -> dict[str]:
             'DataSetId': response.get('DataSetId'),
             'PhysicalTableMap': response.get('PhysicalTableMap'),
             'LogicalTableMap': response.get('LogicalTableMap'),
-            'ImportMode': response.get('ImportMode'),
+            'ImportMode': 'DIRECT_QUERY',#response.get('ImportMode'),
             'Arn': response.get('Arn')
         }
 

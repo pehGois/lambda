@@ -1,4 +1,5 @@
-class DatasetWrapper():
+from utils.utils import extract_id_from_arn
+class AWSDataset():
 
     def __init__(self, logger: object, client: object, acc_id:str) -> None:
         """Analysis Constructor
@@ -15,7 +16,7 @@ class DatasetWrapper():
     def set_dataset_id(self, dataset_id:str):
         self.dataset_id = dataset_id
     
-    def describe_dataset(client, acc_id:str, database_id:str) -> dict[str]:
+    def describe_dataset(self, client, acc_id:str, database_id:str) -> dict[str]:
         '''Função Responsável por descrever as características de um dataset.
         Retorna um dicionário com os campos
         '''
@@ -43,10 +44,10 @@ class DatasetWrapper():
             return dataset_info
 
         except Exception as e:
-            logger.error(f'An error ocurred in describe_dataset function: {e}')
+            self.logger.error(f'An error ocurred in describe_dataset function: {e}')
             return None
         
-    def create_dataset(client, acc_id:str, dataset_info:dict[str], user_arn:str) -> int:
+    def create_dataset(self, client, acc_id:str, dataset_info:dict[str], user_arn:str) -> int:
         ''' Função Responsável pela Criação de Datasets ea alteração de suas permissões na nova região'''
         try:
             response = client.create_data_set(
@@ -64,17 +65,17 @@ class DatasetWrapper():
                     }
                 ]
             )
-            logger.info("Dataset Created Sucefully")
+            self.logger.info("Dataset Created Sucefully")
             return response
         except Exception as e:
             if str(type(e)) == "<class 'botocore.errorfactory.ResourceExistsException'>":
-                logger.warning('Dataset Already Exists in This Region')
+                self.logger.warning('Dataset Already Exists in This Region')
                 return 2
             else:
-                logger.error(f'An error ocurred in create_dataset function.\n Error: {e}')
+                self.logger.error(f'An error ocurred in create_dataset function.\n Error: {e}')
             return 0
 
-    def update_dataset(client, acc_id,dataset_info, user_arn):
+    def update_dataset(self, client, acc_id,dataset_info, user_arn):
         try:
             response = client.update_data_set(
                     AwsAccountId=acc_id,
@@ -91,9 +92,9 @@ class DatasetWrapper():
                         }
                     ]
             )
-            logger.info("Dataset Created Sucefully")
+            self.logger.info("Dataset Created Sucefully")
             return response
         except Exception as e:
-            logger.error(f'An error ocurred in create_dataset function.\n Error: {e}')
+            self.logger.error(f'An error ocurred in create_dataset function.\n Error: {e}')
             return 0
         

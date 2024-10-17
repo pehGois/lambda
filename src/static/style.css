@@ -25,7 +25,7 @@ label {
     font-weight: bold;
 }
 
-input[type="text"],input[type="email"],input[type="number"],select,textarea {
+input[type="text"],input[type="email"],input[type="number"],select,textarea,.select {
     width: 100%;
     padding: 8px;
     margin-bottom: 15px;

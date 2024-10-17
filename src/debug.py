@@ -1,9 +1,9 @@
 from lambda_function import lambda_handler
 event = {
     'email': 'pedro.nunes@omotor.com.br',
-    'analysis_id': '88a05651-36e7-48b6-bcef-2977b02a6058',
-    'action': 'ANALYSIS_UPDATE',
-    'target_region': 'us-east-1',
+    'analysis_id': '4cd18184-821d-4e5d-b757-9ecd02988195',
+    'action': 'MIGRATION',
+    'target_region': 'us-west-2',
     'source_region': 'us-east-1',
     'version': 1, 
     'comment': "Testando o Lambda",
