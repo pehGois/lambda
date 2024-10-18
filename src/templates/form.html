@@ -21,7 +21,7 @@
 
             <label for="action">Action:</label>
             <select class='select' id="action" name="action" required>
-                {% for action_name, function in ACTIONS.items() %}
+                {% for action_name in ACTIONS %}
                     <option class="select" value="{{ action_name }}">{{ action_name }}</option>
                 {% endfor %}
             </select>

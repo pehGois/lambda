@@ -1,32 +1,28 @@
 from AWSClient import AWSClient
+
 class AWSAnalysis(AWSClient):
 
-    def __init__(self, resource:str, region: object, acc_id:str, logger: object = None) -> None:
-        """Analysis Constructor
+    def __init__(self, source_info:dict, target_info:dict, acc_id: str, logger:object = None):
+        """_summary_
+
         Args:
-            logger (object): logger object
-            acc_id (str): aws account Id
-            client (object): aws quicksight client
+            source_info (dict): _description_
+            target_info (dict): _description_
+            acc_id (str): _description_
+            logger (object, optional): _description_. Defaults to None.
         """
-        self.__analysis_id = None
-        super(AWSAnalysis, self).__init__(resource, region, acc_id, logger)
+        super(AWSAnalysis, self).__init__('quicksight', source_info, target_info, acc_id, logger)
 
     def set_analysis_id(self, analysis_id: str):
-        self.__analysis_id = analysis_id
+        self._analysis_id = analysis_id
 
     def describe_analysis(self) -> dict :
-        """Describes the analysis details
-        Args:
-            analysis_id (str): Analysis Id
-        Returns:
-            dict
-        """
         try:
-            analysis_descripion = self.client.describe_analysis(AwsAccountId=self.acc_id,AnalysisId=self.__analysis_id)['Analysis']
+            analysis_descripion = self.client.describe_analysis(AwsAccountId=self.acc_id,AnalysisId=self._analysis_id)['Analysis']
 
             analysisInfo = {
                 'Arn': analysis_descripion['Arn'],
-                'Id': self.__analysis_id,
+                'Id': self._analysis_id,
                 'Name': analysis_descripion['Name'],
                 'DataSetArns': analysis_descripion['DataSetArns']
             }
@@ -196,7 +192,7 @@ class AWSAnalysis(AWSClient):
         try:
             self.client.update_analysis_permissions(
             AwsAccountId=self.acc_id,
-            AnalysisId= self.__analysis_id,
+            AnalysisId= self._analysis_id,
             GrantPermissions=[
                     {
                         'Principal': user_arn,

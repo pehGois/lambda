@@ -167,7 +167,7 @@ def create_dataset_handler(acc_id: str, database_id: str, user_arn: str, source_
                 # Intermediate Table is the table were the JOIN happens
                 if logical_table_info['Alias'] != 'Intermediate Table':
                     join_dataset_info = describe_dataset(source_client['client'], acc_id, extract_id_from_arn(logical_table_info['Source']['DataSetArn']))
-                    join_dataset_info = switch_arn(join_dataset_info)
+                    join_dataset_info = switch_datasource_arn(join_dataset_info)
 
                     create_dataset(client=target_client['client'], acc_id=acc_id, user_arn=user_arn, dataset_info=join_dataset_info)
                     dataset_info['LogicalTableMap'][id]['Source']['DataSetArn'] = logical_table_info['Source']['DataSetArn'].replace(source_client['region'], target_client['region'])
