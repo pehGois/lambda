@@ -1,9 +1,16 @@
-from utils.utils import extract_id_from_arn
 from classes.AnalysisWrapper import AWSAnalysis
 from classes.DatasetWrapper import AWSDataset
 from classes.AWSClientWrapper import AWSClientHandler
 from classes.TemplatesWrapper import AWSTemplates
+from typing import Any
+from enum import Enum
+from utils.helper import *
 import logging
+
+class HandlerStatus(Enum):
+    FAILURE = 0
+    SUCCESS = 1
+    ALREADY_EXISTS = 2
 
 class Handler(AWSClientHandler):
     """ Service Responsable for Handling The Classes used in the Analysis Migration """
@@ -27,19 +34,9 @@ class Handler(AWSClientHandler):
             case 'TEMPLATE_UPDATE':
                 return self.update_template_handler(kwargs.get('analysis_id'), kwargs.get('comment'))
             case _:
-                return 0
-
-    # TODO Add to Helper        
-    def _switch_datasource_arn(self, dataset_info: dict) -> dict:
-        """Switches the datasource Arn of the source analysis to the target one to enable migration."""
-
-        if dataset_info['PhysicalTableMap']:
-            PhysicalTableMap_id = next(iter(dataset_info['PhysicalTableMap']))
-            dataset_info['PhysicalTableMap'][PhysicalTableMap_id]['CustomSql']['DataSourceArn'] = self._target_data_source_arn
-
-        return dataset_info
+                return HandlerStatus.FAILURE
     
-    def create_dataset_references(self, client, analysis_datasets_arns: list) -> dict[str,str]:
+    def create_dataset_references(self, client, analysis_datasets_arns: list) -> list[dict[str,Any]]:
         """Create a List with the names and ARN with all the datasets of a Analysis"""
         try:
             DataSetReferences = []
@@ -70,11 +67,11 @@ class Handler(AWSClientHandler):
             if analysis_definition.get('ThemeArn'):
                 analysis_definition['ThemeArn'] = self._target_theme
 
-            return 1
+            return HandlerStatus.SUCCESS
         
         except Exception as e:
             self._logger.error(f'An error occurred in migrate_analysis_handler function.\nError: {e}')
-            return 0
+            return HandlerStatus.FAILURE
 
     def create_dataset_handler(self, database_id: str) -> int:
         try:
@@ -86,45 +83,45 @@ class Handler(AWSClientHandler):
                     # Intermediate Table is the table were the JOIN happens
                     if logical_table_info['Alias'] != 'Intermediate Table':
                         child_dataset_info = self._aws_datasets.describe_dataset(self._source_client, extract_id_from_arn(logical_table_info['Source']['DataSetArn']))
-                        child_dataset_info = self._switch_datasource_arn(child_dataset_info)
+                        child_dataset_info = switch_datasource_arn(child_dataset_info)
 
                         if self._aws_datasets.create_dataset(self._target_client, child_dataset_info):
                             child_dataset_new_arn = logical_table_info['Source']['DataSetArn'].replace(self._source_region, self._target_region)
                             dataset_info['LogicalTableMap'][id]['Source']['DataSetArn'] = child_dataset_new_arn
             else:
-                dataset_info = self._switch_datasource_arn(dataset_info)
+                dataset_info = switch_datasource_arn(dataset_info)
 
             response = self._aws_datasets.create_dataset(self._target_client, dataset_info)
             
-            if response == 2:
+            if response == HandlerStatus.ALREADY_EXISTS:
                 return dataset_info['Arn'].replace(self._source_region, self._target_region)
             
             return response['Arn']
         except Exception as e:
             self._logger.error(f'An error occurred in create_dataset_handler function.\nError Message: {e}')
-            return 0
+            return HandlerStatus.FAILURE
 
     def create_template_handler(self, analysis_id: str, comment:str) -> int:
         try:
             # Describe analysis and gather required information
             analysis_info = self._aws_analysis.describe_analysis(self._source_client, analysis_id)
-            dataset_references = self.create_dataset_references(analysis_info['DataSetArns'])
+            dataset_references = self.create_dataset_references(self._target_client, analysis_info['DataSetArns'])
 
-            # Attempt to create the template, return 2 if it fails
+            # Attempt to create the template, return HandlerStatus.ALREADY_EXISTS if it fails
             if not self._aws_templates.create_template(self._target_client, analysis_info, comment, dataset_references):
-                return 2
+                return HandlerStatus.ALREADY_EXISTS
 
             self._logger.info('Template created successfully')
-            return 1
+            return HandlerStatus.SUCCESS
 
         except Exception as e:
             self._logger.error(f'An error occurred in create_template_handler function.\nError: {e}')
-            return 0
+            return HandlerStatus.FAILURE
     
     def update_template_handler(self, analysis_id: str, comment: str) -> int:
         try:
             analysis_info = self._aws_analysis.describe_analysis(self._target_client, analysis_id)
-            dataset_references = self._aws_datasets.create_dataset_references(self._target_client, analysis_info['DataSetArns'])
+            dataset_references = self.create_dataset_references(self._target_client, analysis_info['DataSetArns'])
 
             self._aws_templates.update_template(self._target_client, analysis_info, comment, dataset_references)
             datasets_definition = [self._aws_datasets.describe_dataset(self._target_client, extract_id_from_arn(arn)) for arn in analysis_info['DataSetArns']]
@@ -141,25 +138,24 @@ class Handler(AWSClientHandler):
                                 datasets_definition.append({
                                     id:self._aws_datasets.describe_dataset(self._target_client, extract_id_from_arn(logical_table_info['Source']['DataSetArn']))
                                 })
-            return 1
+            return HandlerStatus.SUCCESS
 
         except Exception as e:
             self._logger.error(f'An error occurred in update_template_handler function.\nError: {e}')
-            return 0
+            return HandlerStatus.FAILURE
 
     def update_analysis_handler(self, analysis_id: str, version: str) -> int:
         try:
-            analysis_info = self._aws_analysis.describe_analysis(analysis_id)
+            analysis_info = self._aws_analysis.describe_analysis(self._target_client, analysis_id)
             template_info = self._aws_templates.describe_template(analysis_id, version)
             dataset_references = self.create_dataset_references(analysis_info['DataSetArns'])
             
-            if self._aws_analysis.update_analysis(analysis_info, template_info, dataset_references) == 2:
+            if self._aws_analysis.update_analysis(self._target_client, analysis_info, template_info, dataset_references) == HandlerStatus.ALREADY_EXISTS:
                 self._logger.info("Starting to recreate the analysis based on the template")
-                self._aws_analysis.create_analysis(analysis_info, template_info, dataset_references)
+                self._aws_analysis.create_analysis(self._target_client, analysis_info, template_info, dataset_references)
                 self._aws_analysis.grant_auth(analysis_id)
             
-            return 1
+            return HandlerStatus.SUCCESS
         except Exception as e:
             self._logger.error(f'An error occurred in update_analysis_handler function.\nError Message: {e}')
-            return 0
-        
+            return HandlerStatus.FAILURE
