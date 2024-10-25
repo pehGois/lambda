@@ -1,42 +1,47 @@
-from AWSClient import AWSClient
+import logging
 
-class AWSAnalysis(AWSClient):
+class AWSAnalysis():
 
-    def __init__(self, source_info:dict, target_info:dict, acc_id: str, logger:object = None):
-        """_summary_
-
+    def __init__(self, acc_id:str, user_arn:str, logger:logging):
+        """Analysis Constructor
         Args:
-            source_info (dict): _description_
-            target_info (dict): _description_
-            acc_id (str): _description_
-            logger (object, optional): _description_. Defaults to None.
+            acc_id (str): aws account Id
+            user_arn (str): AWS user ARN
+            logger (object): logger object
         """
-        super(AWSAnalysis, self).__init__('quicksight', source_info, target_info, acc_id, logger)
+        self._analysis_id = None
+        self._acc_id = acc_id
+        self._user_arn = user_arn
+        self._logger = logger
 
     def set_analysis_id(self, analysis_id: str):
         self._analysis_id = analysis_id
 
-    def describe_analysis(self) -> dict :
+    def describe_analysis(self, client, analysis_id = None) -> dict:
         try:
-            analysis_descripion = self.client.describe_analysis(AwsAccountId=self.acc_id,AnalysisId=self._analysis_id)['Analysis']
+            if analysis_id: self.set_analysis_id(analysis_id)
 
-            analysisInfo = {
+            analysis_descripion = client.describe_analysis(
+                AwsAccountId=self._acc_id,
+                AnalysisId=self._analysis_id
+            )['Analysis']
+
+            self._logger.debug(f'analysis_descripion {type(analysis_descripion)}: {analysis_descripion}')
+
+            analysis_info = {
                 'Arn': analysis_descripion['Arn'],
                 'Id': self._analysis_id,
                 'Name': analysis_descripion['Name'],
-                'DataSetArns': analysis_descripion['DataSetArns']
+                'DataSetArns': analysis_descripion['DataSetArns'],
+                'ThemeArn': analysis_descripion.get('ThemeArn', None)
             }
 
-            if 'ThemeArn' in analysis_descripion:
-                analysisInfo['ThemeArn'] = analysis_descripion['ThemeArn']
-            else: 
-                analysisInfo['ThemeArn'] = None
-
-            return analysisInfo
+            return analysis_info
+        
         except Exception as e:
             self._logger.error(f'An error ocurred in describe_analysis function.\n Error: {e}')
 
-    def update_analysis(self, analysis_info:dict, template_info:dict, dataset_references:dict) -> int :
+    def update_analysis(self, client, analysis_info:dict, template_info:dict, dataset_references:dict) -> int :
         """ Update the Analysis ID based in a template
         Args:
             analysis_id (str): Analysis Id
@@ -46,7 +51,7 @@ class AWSAnalysis(AWSClient):
             int: Returns 1 if Succes, 0 if Failure and 2 if the Analysis alredy exists
         """
         try:
-            self.client.update_analysis(
+            client.update_analysis(
                 AwsAccountId=self._acc_id,
                 AnalysisId=analysis_info['Id'],
                 Name=analysis_info['Name'],
@@ -57,6 +62,7 @@ class AWSAnalysis(AWSClient):
                     }
                 }
             )
+
         except Exception as e:
             if str(type(e)) == "<class 'botocore.errorfactory.ResourceNotFoundException'>":
                 self._logger.error('Analysis is Not Found')
@@ -67,7 +73,7 @@ class AWSAnalysis(AWSClient):
             self._logger.info('Analysis Updated Successfully')
             return 1
 
-    def create_analysis(self, analysis_info:dict, template_info:dict, dataset_references:dict) -> int:
+    def create_analysis(self, client, analysis_info:dict, template_info:dict, dataset_references:dict) -> int:
         """Create an Analysis in the given Region
         Args:
             analysis_info (dict): analysis info dictionary, can be obtained by Describe Analysis Function
@@ -77,7 +83,7 @@ class AWSAnalysis(AWSClient):
             int: Returns 1 if Succes, 0 if Failure and 2 if the Analysis alredy exists
         """
         try:
-            self.client.create_analysis(
+            client.create_analysis(
                 AwsAccountId=self._acc_id,
                 AnalysisId=analysis_info['Id'],
                 Name=analysis_info['Name'],
@@ -102,13 +108,13 @@ class AWSAnalysis(AWSClient):
             self._logger.info('Analysis Created With Success')
             return 1
 
-    def list_analysis(self, next_token=None, analyses=[]):
+    def list_analysis(self, client, next_token=None, analyses=[]):
         """Recursion to list all the analysis in a region"""
         try:
             if next_token:
-                response = self._client.list_analyses(AwsAccountId=self.acc_id, NextToken=next_token)
+                response = client.list_analyses(AwsAccountId=self.acc_id, NextToken=next_token)
             else:
-                response = self._client.list_analyses(AwsAccountId=self.acc_id)
+                response = client.list_analyses(AwsAccountId=self.acc_id)
 
             for analysis in response['AnalysisSummaryList']:
                 analyses.append({
@@ -128,19 +134,19 @@ class AWSAnalysis(AWSClient):
             
         return analyses
 
-    def list_deleted_analysis(self) -> list[dict[str]]:
+    def list_deleted_analysis(self, client) -> list[dict[str]]:
         """Filter the Analysis whose status is equal to DELETED
         Returns:
             list[dict[str]]: Id, Name, Arn, Status 
         """
         try:    
-            analysis_list = self.list_analysis(self.client, self.acc_id)
+            analysis_list = self.list_analysis(client, self._acc_id)
             data = [analysis for analysis in analysis_list if analysis['Status'] == 'DELETED']
             return data
         except Exception as e:
             self._logger.error(f"An error ocurred in list_deleted_analysis function.\n Error: {e}")
 
-    def restore_analysis(self, analysis_id:str) -> int:
+    def restore_analysis(self, client, analysis_id:str) -> int:
         """Restore a Deleted Analysis
         Args:
             analysis_id (str): deleted analysis id
@@ -148,17 +154,18 @@ class AWSAnalysis(AWSClient):
             int: Returns 1 if Success and 0 if Fail  
         """
         try:
-            self.self.logger.debug(self.client.restore_analysis(
-                AwsAccountId=self.acc_id,
+            restore_analysis = (client.restore_analysis(
+                AwsAccountId=self._acc_id,
                 AnalysisId=analysis_id
             ))
-            self.self.logger.info("Analysis Restoured")
+            self._logger.debug(f'restore_analysis {type(restore_analysis)}: {restore_analysis}')
+            self._logger.info("Analysis Restoured")
             return 1
         except Exception as e:
-            self.self.logger.error(f"An error ocurred in restore_analysis function.\nError: {e}")
+            self._logger.error(f"An error ocurred in restore_analysis function.\nError: {e}")
             return 0
 
-    def describe_analysis_definition(self, analysis_id:str) -> dict:
+    def describe_analysis_definition(self, client, analysis_id:str = None) -> dict:
         """Retorna um Dicionário Descrevendo a Análise em Detalhes
         Args:
             analysis_id (str): analysis id
@@ -166,32 +173,37 @@ class AWSAnalysis(AWSClient):
             dict:
         """
         try: 
-            self.self.logger.info("Describing analysis Definition")
-            response = self.client.describe_analysis_definition(
-                AwsAccountId=self.acc_id,
-                AnalysisId=analysis_id
+            if analysis_id: self.set_analysis_id(analysis_id)
+
+            self._logger.info("Describing analysis Definition")
+
+            response = client.describe_analysis_definition(
+                AwsAccountId=self._acc_id,
+                AnalysisId= self._analysis_id
             )
+
+            self._logger.debug(f'Analysis Definition\n{response}')
             
-            data ={
+            data = {
                 'Definition': response['Definition'],
                 'Name': response['Name'],
-                'Id': response['AnalysisId']
+                'Id': response['AnalysisId'],
+                'ThemeArn': response.get('ThemeArn'),
             }
 
-            if 'ThemeArn' in data:
-                data['ThemeArn'] = response['ThemeArn']
-            else: 
-                data['ThemeArn'] = None
+            self._logger.debug("#"*10,f"\nAnalysis Definition\n{data}")
+
             return data
         except Exception as e:
-            self.self.logger.error(f"An error ocurred in describe_analysis_definition function.\nError: {e}")
+            self._logger.error(f"An error ocurred in describe_analysis_definition function.\nError: {e}")
             return 0
         
-    def grant_auth(self, user_arn:str):
+    def grant_auth(self, client, user_arn:str, analysis_id:str = None):
         ''' Atualiza as Permissões de Um Usuário Sobre uma Análise: Update, Restore, Delete, Query e Describe'''
+        if analysis_id: self.set_analysis_id(analysis_id)
         try:
-            self.client.update_analysis_permissions(
-            AwsAccountId=self.acc_id,
+            client.update_analysis_permissions(
+            AwsAccountId=self._acc_id,
             AnalysisId= self._analysis_id,
             GrantPermissions=[
                     {
@@ -208,9 +220,9 @@ class AWSAnalysis(AWSClient):
                     }
                 ]
             )
-            self.self.logger.info("Permission Granted Successfully")
+            self._logger.info("Permission Granted Successfully")
         except Exception as e:
-            self.self.logger.error(f'An error ocurred in grant_auth function.\n Error: {e}')
+            self._logger.error(f'An error ocurred in grant_auth function.\n Error: {e}')
 
     def create_analysis_by_definition(self, analysis_definition:dict) -> int:
         """Create an Analysis in the given Region
@@ -219,27 +231,24 @@ class AWSAnalysis(AWSClient):
             analysis_info (dict): analysis info dictionary, can be obtained by Describe Analysis Function
             template_info (dict): Tempate Info dictionary, can be obtained by Desribe Template Function
             dataset_references (dict): Dataset References, can be obtained by Create Data Reference Function
-
-        Returns:
-            int: 1 if Success, 2 If already Exists, 1 if Fail
         """
         try:
             self.client.create_analysis(
-                AwsAccountId = self.acc_id,
+                AwsAccountId = self._acc_id,
                 AnalysisId = analysis_definition['Id'],
                 Name = analysis_definition['Name'],
                 Definition = analysis_definition['Definition']
             )
         except Exception as e:
             if str(type(e)) == "<class 'botocore.errorfactory.ResourceExistsException'>":
-                self.logger.warning('Analysis Already Exists in this Region')
+                self._logger.warning('Analysis Already Exists in this Region')
                 return 2
             elif str(type(e)) == "<class 'botocorefactory.ResourceNotFoundException'>":
-                self.logger.error('Analysis is Not Found')
+                self._logger.error('Analysis is Not Found')
                 return 0
             else:
-                self.logger.error(f'An error ocurred in create_analysis_by_definition function.\n Error: {e}')
+                self._logger.error(f'An error ocurred in create_analysis_by_definition function.\n Error: {e}')
                 return 0
         else:
-            self.logger.info('Analysis Created With Success')
+            self._logger.info('Analysis Created With Success')
             return 1

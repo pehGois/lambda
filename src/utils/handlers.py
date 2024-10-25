@@ -3,29 +3,22 @@ import datetime
 from utils.utils import *
 
 # Handlers
-def return_log_message(action, email, source, target = None, result = None, analysis_id = None, comment = None) -> dict:
+def return_message(action, status, **kwargs) -> dict:
     with open("logs/logs.log", "r") as log: log = log.read().splitlines()
     with open("logs/logs.log", "w"): pass # Limpando o arquivo de log
 
-    return {
+    data = {
         "date":datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
         "action":action,
-        "user":email,
-        "source_region":source,
-        "target_region":target,
-        "status":'SUCCESS' if result == 1 else 'FAIL',
-        "analysis_id":analysis_id,
-        "comment":comment if comment else "Nenhuma Observação",
+        "status":'SUCCESS' if status == 1 else 'FAIL',
         "logs": log
     }
 
-def return_json_message(body:str, email:str) -> dict:
-    return {
-        "date":datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'),
-        "statusCode": "FAIL",
-        "body": body,
-        "user": email
-    }
+    for key,value in kwargs.items():
+        if key in kwargs:
+            data[key] = value
+
+    return data
 
 def s3_save_json(data: dict) -> str:
     """Constructs a dict to send to the S3 Bucket and saves it in a temp JSON file."""
@@ -230,8 +223,3 @@ def update_analysis_handler(client, acc_id: str, analysis_id: str, version: str,
     except Exception as e:
         logger.error(f'An error occurred in update_analysis_handler function.\nError Message: {e}')
         return 0
-    
-    client.get_object(
-        Bucket='caminho'
-        
-    )
