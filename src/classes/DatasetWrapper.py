@@ -1,4 +1,4 @@
-from utils.utils import extract_id_from_arn
+from utils.helper import extract_id_from_arn
 import logging
 
 class AWSDataset():
@@ -18,7 +18,7 @@ class AWSDataset():
     def set_dataset_id(self, dataset_id:str):
         self.dataset_id = dataset_id
     
-    def describe_dataset(self, client, database_id:str) -> dict[str,str]:
+    def describe_dataset(self, client, database_id:str, import_mode:str) -> dict[str,str]:
         '''Função Responsável por descrever as características de um dataset.
         Retorna um dicionário com os campos
         '''
@@ -35,7 +35,7 @@ class AWSDataset():
                 'DataSetId': response.get('DataSetId'),
                 'PhysicalTableMap': response.get('PhysicalTableMap'),
                 'LogicalTableMap': response.get('LogicalTableMap'),
-                'ImportMode': response.get('ImportMode'),
+                'ImportMode': import_mode if import_mode != 'DEFAULT' else response.get('ImportMode'),
                 'Arn': response.get('Arn'),
                 'DataSourceId': ''
             }

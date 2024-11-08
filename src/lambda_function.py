@@ -2,12 +2,13 @@ import os
 import boto3
 from classes.AnalysisWrapper import AWSAnalysis
 from classes.DatasetWrapper import AWSDataset
+from classes.TemplatesWrapper import AWSTemplates
 from classes.Handler import Handler
-from utils.handlers import *
+from utils.helper import *
 from fast_api import *
 
 from dotenv import load_dotenv
-load_dotenv("env/.env")
+load_dotenv("src/.env/.env")
 
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID')
 THEME_ARN_PROD = os.environ.get('THEME_ARN_PROD')
@@ -19,23 +20,21 @@ DEV_ARN = os.environ.get('DEV_ARN')
 BUCKET = os.environ.get('BUCKET')
 
 ACTIONS = ["LIST_DELETED_ANALYSIS","TEMPLATE_CREATION","ANALYSIS_UPDATE","TEMPLATE_UPDATE","MIGRATION","RESTORE_ANALYSIS"]
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='logs.log')
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 def lambda_handler(event: dict[str,str], context):
     try:
         
+        bucket = BUCKET
+        email = event['email']
         action = event['action']
         source = event['source_region']
         target = event['target_region']
-        email = event['email']
-        analysis_id = event.get('analysis_id')
         version = event.get('version')
-        comment = event.get('comment', 'Nenhum Comentário')
-        stakeholder = event.get('stakeholder', 'OMOTOR')
+        analysis_id = event.get('analysis_id')
         import_mode = event.get('import_mode')
-        bucket = BUCKET
+        stakeholder = event.get('stakeholder', 'OMOTOR')
+        comment = event.get('comment', 'Nenhum Comentário')
 
         prod_client = boto3.client('quicksight', region_name=PROD_REGION)
         user_arn = search_user(prod_client, AWS_ACCOUNT_ID, email)
@@ -58,6 +57,7 @@ def lambda_handler(event: dict[str,str], context):
             target_info,
             AWSAnalysis(AWS_ACCOUNT_ID, user_arn, logger),
             AWSDataset(AWS_ACCOUNT_ID, user_arn, logger),
+            AWSTemplates(AWS_ACCOUNT_ID, user_arn, logger),
             logger
         )
         status = handler.invoke(action, analysis_id = analysis_id, comment = comment, version = version, stakeholder = stakeholder, import_mode = import_mode, bucket = bucket)

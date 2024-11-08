@@ -1,16 +1,17 @@
 
 import json
-from mangum import Mangum
+#from mangum import Mangum
 from typing import Optional
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, Request
 
-def fast_api(app, actions, lambda_handler):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-    handler = Mangum(app)
+def fast_api(app:FastAPI, actions:list, lambda_handler):
+    app.mount("/static", StaticFiles(directory="./src/static"), name="static")
+    
+    #handler = Mangum(app)
     templates = Jinja2Templates(directory="templates")
 
     app.add_middleware(
