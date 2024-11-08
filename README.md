@@ -14,7 +14,7 @@ This project is designed to handle the migration of Amazon QuickSight analyses a
 
 Here's an overview of the folder structure for the project:
 
-```
+```bash
 ├── .dockerignore            # Specifies files to ignore when building Docker images
 ├── .env                     # Environment variables for configuration
 ├── .gitignore               # Specifies files to ignore in Git
@@ -36,22 +36,26 @@ Here's an overview of the folder structure for the project:
 ## Installation
 
 1. **Clone the repository:**
-
    ```bash
    git clone https://github.com/pehGois/lambda.git
    cd lambda
    ```
 
-2. **Install dependencies:**
-
+2. **Create and Ativate a Virtual Enviroment**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate   # On Linux/macOS
+   .venv\Scripts\activate      # On Windows
+   ```
+   
+3. **Install dependencies:**
    Use the following command to install the necessary Python packages:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Set up environment variables:**
-
+4. **Set up environment variables:**
    Make sure to configure the `.env` file with the necessary AWS credentials and other configuration settings required for QuickSight integration.
    It's highly recommendable to install the AWS CLI, otherwise you'll have to include your credentians manually in the client solicitacion
 
