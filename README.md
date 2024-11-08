@@ -1,44 +1,67 @@
-# Migration Lambda
+# QuickSight Analysis and Dataset Migration
 
-Migração de Análises entre Regiões; Atualização e Restauração de Análises baseados em templates salvos na S3; Criação e Upload de Templates de Análises.
+This project is designed to handle the migration of Amazon QuickSight analyses and datasets. It includes various components to streamline the migration process, error logging, and handling templates in AWS QuickSight.
 
-Caso iniciar via console executar: 
+## Table of Contents
 
-```shell
-  cd src
-  uvicorn lambda_function:app --reload  
+- [QuickSight Analysis and Dataset Migration](#quicksight-analysis-and-dataset-migration)
+  - [Table of Contents](#table-of-contents)
+  - [Project Structure](#project-structure)
+  - [Installation](#installation)
+  - [Usage](#usage)
+
+## Project Structure
+
+Here's an overview of the folder structure for the project:
+
+```
+├── .dockerignore            # Specifies files to ignore when building Docker images
+├── .env                     # Environment variables for configuration
+├── .gitignore               # Specifies files to ignore in Git
+├── Dockerfile               # Docker image configuration
+├── README.md                # Project documentation
+├── compose.yaml             # Docker Compose configuration
+├── debug.py                 # Debugging script for testing
+├── fast_api.py              # FastAPI application entry point
+├── lambda_function.py       # AWS Lambda handler function
+├── requirements.txt         # Python dependencies
+├── src/                     # Main source code directory
+│   ├── classes/             # Core classes for handling migration
+│   ├── logs/                # Log files
+│   ├── static/              # Static files (e.g., CSS, images)
+│   ├── templates/           # HTML templates for rendering
+│   └── utils/               # Utility functions and helpers
 ```
 
-## Campos
-- **aws_access_key_id** : Chave de Acesso AWS
-- **aws_secret_access_key** : Senha de Acesso AWS
-- **email** : Email do usuário que deseja fazer esta migração. É imprescindível que o usuário tenha as autorizações necessárias para realizar esta atividade.
-- **action** : Ação que se deseja realizar. Podendo ser:
-    - **MIGRATION** : Para realizar a migração de uma ou mais análises entre a source_region e a target_region.
-      - **Requisítos**: 
-        - analysis_id, 
-        - target_region.
-        - stakeholder
-    - **TEMPLATE_CREATION** : Para realizar a criação de um template na target_region.
-      - **Requisítos**: 
-        - analysis_id, 
-        - comment,
-    - **TEMPLATE_UPDATE** : Para realizar o update de um template existente na target_region.
-      - **Requisítos**: 
-        - analysis_id,
-        - comment,
-    - **ANALYSIS_UPDATE** : Atualiza uma análise baseado em um template.
-      - **Requisítos**
-        - analysis_id,
-        - version
-    - **LIST_DELETED_ANALYSIS** : Retorna a lista de análises presente na lixeira do Quicksight [30 dias].
-    - **RESTORE_ANALYSIS** : Restaura uma análise que esteja na lixeira do Quicksight.
-      - **Requisítos**
-        - analysis_id
-- **analysis_id** : Id das análises que você deseja alterar.
-- **source_region** : Região onde a análise fonte se encontra.
-- **target_region** : Região para onde se deseja migrar a análise.
-- **version** : Versão do Template. Obrigatório somente durante a ação de **ANALYSIS_UPDATE**.
-- **comment** : Utilizado durante a ação de TEMPLATE_CREATION e para definir a descrição do template criado. 
-- **stakeholder** : Cliente dono do dashboard. Representado por uma pasta na S3 onde os templates são salvos.
-- [Link para o Bucket onde os dados são salvos](https://us-east-1.console.aws.amazon.com/s3/buckets/teste-ml-omotor?region=us-east-1&bucketType=general&prefix=quicksight_templates/&showversions=false)
+## Installation
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone https://github.com/pehGois/lambda.git
+   cd lambda
+   ```
+
+2. **Install dependencies:**
+
+   Use the following command to install the necessary Python packages:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Set up environment variables:**
+
+   Make sure to configure the `.env` file with the necessary AWS credentials and other configuration settings required for QuickSight integration.
+   It's highly recommendable to install the AWS CLI, otherwise you'll have to include your credentians manually in the client solicitacion
+
+## Usage
+
+1. **Running the FastAPI Server:**
+
+   To start the FastAPI server, run:
+
+   ```bash
+   python fast_api.py
+   uvicorn lambda_function:app --reload
+   ```
