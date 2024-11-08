@@ -62,6 +62,5 @@ Here's an overview of the folder structure for the project:
    To start the FastAPI server, run:
 
    ```bash
-   python fast_api.py
    uvicorn lambda_function:app --reload
    ```
